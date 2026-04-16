@@ -7,13 +7,13 @@
 #'
 #' @param data Character string. Name of the data matrix or data frame on the
 #'   server(s) on which PCA will be computed. The matrix must have
-#'   \strong{samples as rows and features as columns}, as PCA is computed on the
-#'   covariance matrix across columns. Note that omic matrices (e.g. RNAseq)
+#'   \strong{samples as rows and features as columns}.
+#'   Note that omic matrices (e.g. RNAseq)
 #'   are typically stored in the opposite orientation (features x samples) and
 #'   must be transposed before use (e.g. via \code{datashield.assign(conns,
 #'   "expr_t", quote(t(expr)))}). Only numeric columns are used by
 #'   \code{dssPrincomp}.
-#' @param vars Character string. Name of the variables data frame on the
+#' @param vars Character string. Name of the variables (predictors) data frame on the
 #'   server(s) containing the features to associate with the PCs (e.g. clinical
 #'   variables).
 #' @param datasources A list of \code{DSConnection}-class objects. Default NULL
@@ -177,8 +177,7 @@ ds.plotDrivers <- function(data = NULL,
                            return_data = FALSE,
                            verbose = FALSE) {
 
-  # Input validation -------------------------------------------------------------
-
+  # Validate input data
   if (is.null(datasources)) datasources <- DSI::datashield.connections_find()
   .check_datasources(datasources)
 
@@ -189,8 +188,7 @@ ds.plotDrivers <- function(data = NULL,
     stop("'type' must be either 'combine' or 'split'.", call. = FALSE)
   }
 
-  # Check that data and vars exist on all servers --------------------------------
-
+  # Check that data and vars exist on all servers
   invisible(lapply(names(datasources), function(ds_name) {
     if (!check_object_exists(data, datasources[ds_name])) {
       stop("Object '", data, "' not found on server '", ds_name, "'.", call. = FALSE)
@@ -200,15 +198,14 @@ ds.plotDrivers <- function(data = NULL,
     }
   }))
 
-  # Compute PCA via dssPrincomp --------------------------------------------------
-
+  # Compute PCA via dssPrincomp
   # The scores object assigned on each server will be named paste0(data, "_scores").
   # This object persists after the function returns and can be used for further
-  # downstream analyses (e.g. biplots).
+  # downstream analyses
   scores_name <- paste0(data, "_scores")
 
-  # With a single server, type makes no practical difference; use "split" to
-  # avoid unnecessary cross-server communication.
+  # With a single server, "type=combine" makes no practical difference,
+  # use "split" to avoid unnecessary cross-server communication.
   pca_type <- if (length(datasources) == 1) "split" else type
 
   if (verbose) message("Running dssPrincomp (type = '", pca_type, "') ...")
@@ -223,10 +220,9 @@ ds.plotDrivers <- function(data = NULL,
 
   if (verbose) message("PCA scores assigned to '", scores_name, "' on each server.")
 
-  # Call server-side association function ----------------------------------------
-
-  # When type = "combine", p value combination is done client-side after aggregation,
-  # so we do not apply p_adj server-side.
+  # Call server-side association function
+  # When type = "combine", p value combination will be done here after aggregation,
+  # (client-side) so we do not apply p_adj server-side.
   server_p_adj <- if (length(datasources) > 1 && type == "combine") NULL else p_adj
 
   cally <- call("plotDriversDS",
@@ -240,8 +236,7 @@ ds.plotDrivers <- function(data = NULL,
 
   server_outputs <- DSI::datashield.aggregate(datasources, cally)
 
-  # Parse server outputs ---------------------------------------------------------
-
+  # Parse server outputs
   site_results <- lapply(server_outputs, function(x) x$results)
   site_metadata <- lapply(server_outputs, function(x) {
     list(
