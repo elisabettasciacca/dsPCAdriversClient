@@ -23,21 +23,21 @@ ds.plotDrivers(
   transpose_plot = FALSE,
   drop_insignificant_x = FALSE,
   drop_insignificant_y = FALSE,
-  return_data = FALSE,
+  return_pvalues = FALSE,
   verbose = FALSE
 )
 }
 \arguments{
 \item{data}{Character string. Name of the data matrix or data frame on the
 server(s) on which PCA will be computed. The matrix must have
-\strong{samples as rows and features as columns}, as PCA is computed on the
-covariance matrix across columns. Note that omic matrices (e.g. RNAseq)
+\strong{samples as rows and features as columns}.
+Note that omic matrices (e.g. RNAseq)
 are typically stored in the opposite orientation (features x samples) and
 must be transposed before use (e.g. via \code{datashield.assign(conns,
   "expr_t", quote(t(expr)))}). Only numeric columns are used by
 \code{dssPrincomp}.}
 
-\item{vars}{Character string. Name of the variables data frame on the
+\item{vars}{Character string. Name of the variables (predictors) data frame on the
 server(s) containing the features to associate with the PCs (e.g. clinical
 variables).}
 
@@ -100,20 +100,20 @@ associations? Default FALSE.}
 \item{drop_insignificant_y}{Logical. Remove variables with no significant
 associations? Default FALSE.}
 
-\item{return_data}{Logical. Return results data frame(s) instead of a plot?
+\item{return_pvalues}{Logical. Return results data frame(s) instead of a plot?
 Default FALSE.}
 
 \item{verbose}{Logical. Print diagnostic messages from the server? Default
 FALSE.}
 }
 \value{
-When \code{return_data = FALSE} (default):
+When \code{return_pvalues = FALSE} (default):
 \itemize{
 \item \code{type = "combine"}: a single \code{ggplot2} heatmap.
 \item \code{type = "split"}: a single \code{ggplot2} heatmap faceted by
 site.
 }
-When \code{return_data = TRUE}, a list containing:
+When \code{return_pvalues = TRUE}, a list containing:
 \itemize{
 \item \code{results}: data frame (or named list of data frames for
 \code{type = "split"} with multiple sites) with columns
@@ -199,7 +199,7 @@ res <- ds.plotDrivers(
   vars        = "clinical",
   datasources = conns,
   type        = "combine",
-  return_data = TRUE
+  return_pvalues = TRUE
 )
 head(res$results)
 }

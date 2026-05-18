@@ -1,0 +1,429 @@
+---
+title: "Visualising drivers of variation in federated omic studies"
+author: "Elisabetta Sciacca"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+    toc_depth: 3
+    number_sections: false
+vignette: >
+  %\VignetteIndexEntry{Visualising drivers of variation in federated omic studies}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse  = TRUE,
+  comment   = "#>",
+  fig.width = 7,
+  fig.height = 5
+)
+
+# DSLite demo chunks run only if all required packages are available
+run_dslite <- requireNamespace("DSLite",            quietly = TRUE) &&
+              requireNamespace("DSI",               quietly = TRUE) &&
+              requireNamespace("dsBaseClient",       quietly = TRUE) &&
+              requireNamespace("dsSwissKnifeClient", quietly = TRUE) &&
+              requireNamespace("dsPCAdrivers",       quietly = TRUE)
+```
+
+# Introduction
+
+`ds.plotDrivers()` generates a tile plot of statistical associations between
+principal components (PCs) and clinical or technical variables in a federated
+[DataSHIELD](https://www.datashield.org) setting. PCA is computed internally
+via `dsSwissKnifeClient::dssPrincomp()` — no pre-existing PCA object is
+required. Only aggregate statistics (p values) leave the servers, preserving
+individual-level data privacy.
+
+The function supports two modes of analysis:
+
+- **Federated (combined) analysis** (`type = "combine"`): a single PCA is
+  computed on the pooled covariance matrix across all sites. All sites share the
+  same PC loadings, making cross-site p value combination statistically
+  meaningful. P values are combined using Fisher's method and a single heatmap
+  is returned.
+- **Site-specific analysis** (`type = "split"`): a separate PCA is computed
+  independently on each server. Because the resulting PCs may differ across
+  sites, p values are not combined, and a faceted heatmap (one panel per site)
+  is returned.
+
+The server-side package `dsPCAdrivers` must be installed on each DataSHIELD
+server. Source code is available at
+<https://github.com/elisabettasciacca/dsPCAdrivers>.
+
+
+# Installation
+
+```{r install, eval = FALSE}
+# Install the client package
+devtools::install_github("elisabettasciacca/dsPCAdriversClient")
+
+# The server-side package must be installed on each DataSHIELD server
+# by the server administrator:
+# devtools::install_github("elisabettasciacca/dsPCAdrivers")
+```
+
+
+---
+
+
+# Part 1: Local Demonstration with DSLite
+
+[DSLite](https://cran.r-project.org/package=DSLite) is an in-memory DataSHIELD
+server that runs entirely within a single R session. It implements the same DSI
+interface as a real Opal server, making it ideal for development, testing, and
+reproducing examples without requiring network access.
+
+This section uses the `site_data` example dataset included in the package,
+which simulates two-site federated RNA-seq data with a known biological
+structure: disease cases upregulate the first 15 genes, and sequencing batch
+introduces a shift in the first 8 genes.
+
+## Setting up the DSLite environment
+
+```{r dslite-setup, eval = run_dslite}
+library(DSLite)
+library(DSI)
+library(dsPCAdrivers)
+library(dsPCAdriversClient)
+library(dsBaseClient)
+library(dsSwissKnifeClient)
+library(dsPCAdriversClient)
+
+# Load simulated example data (2 sites: 60 and 50 samples, 30 genes each)
+data(site_data)
+
+# Create a DSLite server holding all four tables
+dslite.server <- DSLite::newDSLiteServer(
+  tables = list(
+    site1_expr     = site_data$site1$expr,
+    site2_expr     = site_data$site2$expr,
+    site1_clinical = site_data$site1$clinical,
+    site2_clinical = site_data$site2$clinical
+  )
+)
+
+# Load dsBase and dsSwissKnife methods, then register the server-side function
+dslite.server$config(DSLite::defaultDSConfiguration(include = c("dsBase", "dsSwissKnife")))
+dslite.server$aggregateMethod("plotDriversDS", dsPCAdrivers::plotDriversDS)
+
+# Relax privacy filters for local testing only.
+# These settings must NEVER be used with real sensitive data.
+# nfilter.glm = 1.0 is required here because the gene/sample ratio (30/60 = 0.5)
+# exceeds the default threshold of 0.33 used by ds.cov internally.
+options(
+  datashield.privacyControlLevel = "permissive",
+  nfilter.tab     = 3,
+  nfilter.subset  = 3,
+  nfilter.glm     = 1.0,
+  nfilter.string  = 80,
+  nfilter.kNN     = 3
+)
+```
+
+## Connect and assign data
+
+```{r dslite-login, eval = run_dslite}
+builder <- DSI::newDSLoginBuilder()
+builder$append(server = "site1", url = "dslite.server",
+               table = "site1_expr", driver = "DSLiteDriver")
+builder$append(server = "site2", url = "dslite.server",
+               table = "site2_expr", driver = "DSLiteDriver")
+
+conns <- DSI::datashield.login(logins = builder$build(), assign = FALSE)
+
+# Assign expression matrices (samples x genes — already in the correct orientation)
+DSI::datashield.assign.table(
+  conns  = conns,
+  symbol = "expression_data",
+  table  = c(site1 = "site1_expr", site2 = "site2_expr")
+)
+
+# Assign clinical metadata
+DSI::datashield.assign.table(
+  conns  = conns,
+  symbol = "clinical_vars",
+  table  = c(site1 = "site1_clinical", site2 = "site2_clinical")
+)
+```
+
+## Federated analysis
+
+A single PCA is computed on the pooled covariance matrix. Each site then
+projects its samples onto the shared PC axes. P values from both sites are
+combined using Fisher's method, yielding a single heatmap.
+
+Because the pooled covariance matrix is already n-weighted, an additional
+sample-size weight at the combination step is deliberately omitted — it would
+double-count the contribution of larger sites.
+
+After the function returns, the PC scores are retained on each server as
+`"expression_data_scores"` and are available for downstream analyses
+(e.g. biplots).
+
+```{r dslite-combine, eval = run_dslite}
+p_combine <- ds.plotDrivers(
+  data        = "expression_data",
+  vars        = "clinical_vars",
+  datasources = conns,
+  type        = "combine",
+  n_pc        = 5,
+  sig_cutoff  = 0.05,
+  title       = "Federated PCA — combined associations"
+)
+print(p_combine)
+```
+
+## Site-specific analysis
+
+Each site computes its own PCA independently. The resulting PCs may differ in
+direction and magnitude across sites, so p values are not combined. The output
+is a faceted heatmap with one panel per site.
+
+```{r dslite-split, eval = run_dslite}
+p_split <- ds.plotDrivers(
+  data        = "expression_data",
+  vars        = "clinical_vars",
+  datasources = conns,
+  type        = "split",
+  n_pc        = 5,
+  sig_cutoff  = 0.05,
+  title       = "Site-specific PCA — per-site associations"
+)
+print(p_split)
+```
+
+## Cleanup
+
+```{r dslite-logout, eval = run_dslite}
+DSI::datashield.logout(conns)
+```
+
+
+---
+
+
+# Part 2: Real Opal Infrastructure
+
+This section illustrates the same workflow on a real DataSHIELD/Opal
+deployment. All code chunks are non-evaluated (`eval = FALSE`) and serve as a
+template. Plot outputs shown below are representative examples.
+
+## Prerequisites
+
+`ds.plotDrivers()` requires two objects to already be assigned on each server
+before the function is called:
+
+- an expression matrix in **samples × features** orientation (note that omic
+  matrices are typically stored as features × samples and must be transposed
+  beforehand, e.g. via `datashield.assign.expr(conns, "expr_t", quote(t(expr)))`)
+- a data frame of variables to associate with the PCs (e.g. clinical metadata)
+
+## Connect to Opal servers
+
+```{r opal-connect, eval = FALSE}
+library(DSI)
+library(DSOpal)
+library(dsPCAdriversClient)
+
+builder <- DSI::newDSLoginBuilder()
+builder$append(
+  server   = "site1",
+  url      = "https://site1.example.org",
+  user     = "username",
+  password = "password",
+  driver   = "OpalDriver"
+)
+builder$append(
+  server   = "site2",
+  url      = "https://site2.example.org",
+  user     = "username",
+  password = "password",
+  driver   = "OpalDriver"
+)
+
+conns <- DSI::datashield.login(logins = builder$build(), assign = FALSE)
+```
+
+## Federated analysis
+
+```{r opal-combine, eval = FALSE}
+p <- ds.plotDrivers(
+  data        = "expression_data",  # already assigned on each server
+  vars        = "clinical_vars",    # already assigned on each server
+  datasources = conns,
+  type        = "combine",
+  n_pc        = 10,
+  sig_cutoff  = 0.05
+)
+print(p)
+```
+
+<!-- INSERT PLOT: federated analysis output -->
+
+## Site-specific analysis
+
+```{r opal-split, eval = FALSE}
+p <- ds.plotDrivers(
+  data        = "expression_data",
+  vars        = "clinical_vars",
+  datasources = conns,
+  type        = "split",
+  n_pc        = 10,
+  sig_cutoff  = 0.05
+)
+print(p)
+```
+
+<!-- INSERT PLOT: site-specific analysis output -->
+
+## Parametric vs. non-parametric associations
+
+By default, `ds.plotDrivers()` uses parametric tests (Pearson correlation and
+ANOVA). This is the methodologically preferred approach for two reasons.
+
+**Linearity.** PCA is fundamentally a linear dimensionality reduction technique.
+It defines orthogonal axes based on linear covariance, so evaluating these axes
+with linear models perfectly aligns with the mathematical nature of the
+components.
+
+**Normality and power.** Because PCs are linear combinations of numerous omic
+features, their distributions tend toward normality by the Central Limit
+Theorem, satisfying the core assumption of parametric tests. Parametric tests
+also provide greater statistical power, which is critical when applying
+stringent p value corrections across many clinical features.
+
+You should switch to rank-based non-parametric tests (Spearman correlation and
+Kruskal-Wallis) with `parametric = FALSE` in the following scenarios:
+
+- **Ordinal variables**: ranked categories such as tumour stage I–IV or symptom
+  severity, where the distance between levels is not strictly uniform.
+- **Extreme outliers**: highly skewed continuous variables such as untransformed
+  survival times or blood marker levels that would disproportionately influence
+  a linear fit.
+
+```{r opal-parametric, eval = FALSE}
+# Non-parametric (Spearman / Kruskal-Wallis)
+p <- ds.plotDrivers(
+  data        = "expression_data",
+  vars        = "clinical_vars",
+  datasources = conns,
+  parametric  = FALSE,
+  n_pc        = 10
+)
+print(p)
+```
+
+## Multiple testing correction
+
+No correction is applied by default. With `p_adj`, adjustment is applied after
+Fisher's combination when `type = "combine"`, and independently per site when
+`type = "split"`.
+
+```{r opal-padj, eval = FALSE}
+p <- ds.plotDrivers(
+  data        = "expression_data",
+  vars        = "clinical_vars",
+  datasources = conns,
+  p_adj       = "BH",    # Benjamini-Hochberg FDR correction
+  sig_cutoff  = 0.05
+)
+print(p)
+# Other options: "bonferroni", "holm", "hochberg", "hommel", "BY", "fdr"
+```
+
+## Plot customisation
+
+```{r opal-customise, eval = FALSE}
+p <- ds.plotDrivers(
+  data                 = "expression_data",
+  vars                 = "clinical_vars",
+  datasources          = conns,
+  n_pc                 = 10,
+  sig_cutoff           = 0.01,
+  label                = TRUE,         # print -log10(p) values on tiles
+  max_col              = 15,           # fix colour scale maximum
+  title                = "Drivers of variation",
+  legend               = "bottom",
+  transpose_plot       = TRUE,         # PCs on y-axis, variables on x-axis
+  drop_insignificant_x = TRUE,         # remove PCs with no significant associations
+  drop_insignificant_y = TRUE          # remove variables with no significant associations
+)
+print(p)
+```
+
+## Returning results as a data frame
+
+Set `return_pvalues = TRUE` to retrieve the underlying data instead of a plot,
+useful for further statistical analysis or custom visualisation.
+
+```{r opal-return, eval = FALSE}
+res <- ds.plotDrivers(
+  data           = "expression_data",
+  vars           = "clinical_vars",
+  datasources    = conns,
+  return_pvalues = TRUE
+)
+
+# Columns: Feature, PC, pvalue, Association (-log10 p), Significant
+head(res$results)
+
+# Significant associations only
+res$results[res$results$Significant, ]
+
+# Metadata (n per site, combination method, etc.)
+str(res$metadata)
+```
+
+## Cleanup
+
+```{r opal-logout, eval = FALSE}
+DSI::datashield.logout(conns)
+```
+
+
+---
+
+
+# Interpreting the heatmap
+
+Tile colour encodes association strength as $-\log_{10}(p)$: white indicates no
+evidence (p ≈ 1) and dark blue indicates strong evidence (p << 0.05). A black
+border marks tiles where p ≤ `sig_cutoff`.
+
+**Technical confounders** tend to produce strong associations with the earliest
+PCs (PC1, PC2), which capture the largest sources of variance in the data. If
+batch, processing date, or library size dominate the first components, batch
+correction should be considered before downstream analysis.
+
+**Biological drivers** typically emerge in later PCs and reflect lower-variance
+but biologically meaningful signals such as disease status, age, or treatment
+response.
+
+
+# Privacy guarantees
+
+The following information is returned to the client:
+
+- p values (aggregate statistics)
+- number of observations per site
+- PC and variable names
+
+The following information never leaves the server:
+
+- individual-level PC scores
+- raw expression or omic data
+- individual variable values
+- covariance matrices
+
+
+# Session info
+
+```{r session-info}
+sessionInfo()
+```

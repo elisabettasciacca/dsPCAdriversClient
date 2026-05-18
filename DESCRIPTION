@@ -21,3 +21,6 @@ Suggests:
 VignetteBuilder: knitr
 Config/testthat/edition: 3
 Additional_repositories: https://cran.obiba.org/
+Depends: 
+    R (>= 3.5)
+LazyData: true

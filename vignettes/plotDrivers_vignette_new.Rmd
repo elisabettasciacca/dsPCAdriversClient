@@ -1,0 +1,546 @@
+---
+title: "Plot variables most influencing your Principal Components"
+author: "Elisabetta Sciacca"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+    toc_depth: 2
+    number_sections: false
+vignette: >
+  %\VignetteIndexEntry{Plot variables most influencing your Principal Components}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  eval = FALSE
+)
+```
+
+# Introduction
+
+The `ds.plotDrivers` function enables privacy-preserving visualization of associations between principal components (PCs) and clinical/technical variables in federated data analysis studies.
+
+## Key Features
+
+- **Privacy-preserving**: Only aggregate statistics (p-values) leave the server
+- **Automatically scales**: Works identically for one site or many sites
+- **Weighted meta-analysis**: Larger sites get more weight (default)
+- **Multi-package support**: Works with dsML and dsSwissKnife PCA outputs
+- **Flexible**: Supports blocking variables, multiple testing correction, and various customizations
+
+# Installation
+
+```{r install, eval=FALSE}
+# Install client package
+devtools::install_github("your-repo/dsPCAdriversClient")
+
+# Server-side package must be installed on DataSHIELD servers
+# Contact your DataSHIELD administrator
+```
+
+# Basic Workflow
+
+The function works the same way whether you have data on one site or multiple sites.
+
+## Setup Connection(s)
+
+```{r connect}
+library(DSI)
+library(DSOpal)
+library(dsPCAdriversClient)
+
+# Connect to one or more DataSHIELD servers
+builder <- DSI::newDSLoginBuilder()
+
+# Add your site(s)
+builder$append(
+  server = "site1",
+  url = "https://site1.org",
+  user = "username",
+  password = "password",
+  driver = "OpalDriver"
+)
+
+# Add more sites if available
+# builder$append(server = "site2", url = "https://site2.org", ...)
+# builder$append(server = "site3", url = "https://site3.org", ...)
+
+logindata <- builder$build()
+conns <- DSI::datashield.login(logins = logindata, assign = TRUE)
+```
+
+## Load Data
+
+```{r load_data}
+# Assign expression data and clinical variables
+# This happens on each connected server
+datashield.assign.table(
+  conns = conns,
+  symbol = "expression_data",
+  table = "PROJECT.RNASEQ_COUNTS"
+)
+
+datashield.assign.table(
+  conns = conns,
+  symbol = "clinical_vars",
+  table = "PROJECT.CLINICAL_DATA"
+)
+```
+
+## Compute Federated PCA with dsML
+
+dsML computes **federated PCA** - the principal components are common across all sites, as if all data were in one location.
+
+```{r federated_pca}
+library(dsMLClient)
+
+# Compute federated PCA across ALL connected sites
+# (works identically whether you have 1 site or 10 sites)
+datashield.assign.expr(
+  conns = conns,
+  symbol = "pca_result",
+  expr = quote(ds.PCA(
+    x = "expression_data",
+    ncomp = 10,
+    scale = TRUE,
+    center = TRUE
+  ))
+)
+```
+
+## Visualize PC Drivers
+
+```{r plot_drivers}
+# Plot associations between PCs and clinical variables
+# Automatically combines results across all sites
+p <- ds.plotDrivers(
+  pcs = "pca_result",
+  vars = "clinical_vars",
+  datasources = conns,     # All sites
+  n_pc = 10,
+  sig_cutoff = 0.05        # Significance threshold
+)
+
+print(p)
+```
+
+**What happens:**
+- If `conns` has 1 site: plots associations for that site
+- If `conns` has 2+ sites: computes associations at each site, combines p-values using weighted Fisher's method, plots combined results
+
+**No p-value adjustment by default** - to apply correction, add `p_adj = "BH"` or another method.
+
+# Advanced Features
+
+## Multiple Testing Correction
+
+By default, **no correction** is applied. Add correction if testing many associations:
+
+```{r p_adjustment}
+p <- ds.plotDrivers(
+  pcs = "pca_result",
+  vars = "clinical_vars",
+  datasources = conns,
+  n_pc = 10,
+  p_adj = "BH",           # Benjamini-Hochberg FDR correction
+  sig_cutoff = 0.05
+)
+
+# Other options: "bonferroni", "holm", "hochberg", "BY", "fdr"
+```
+
+## Weighting in Multi-Site Analysis
+
+When combining results from multiple sites, by default larger sites get more weight:
+
+```{r weighting}
+# Default: weighted by sample size
+p_weighted <- ds.plotDrivers(
+  pcs = "pca_result",
+  vars = "clinical_vars",
+  datasources = conns,
+  meta_method = "weighted_fisher"    # Default
+)
+
+# Alternative: equal weight for all sites
+p_equal <- ds.plotDrivers(
+  pcs = "pca_result",
+  vars = "clinical_vars",
+  datasources = conns,
+  meta_method = "fisher"             # Equal weights
+)
+```
+
+**Weighted Fisher's method** (default):
+- Sites weighted by sample size
+- A site with 1000 samples has more influence than a site with 100 samples
+- More statistically efficient
+- Recommended in most cases
+
+## Blocking Variables for Longitudinal Data
+
+When subjects are measured at multiple timepoints, use blocking:
+
+```{r blocking}
+# Clinical data structure:
+# - subject_id: repeated for each timepoint
+# - timepoint: measurement occasion (1, 2, 3, ...)
+# - sex, age: constant within subject
+# - treatment, dose: may vary by timepoint
+
+p <- ds.plotDrivers(
+  pcs = "pca_result",
+  vars = "clinical_vars",
+  datasources = conns,
+  block = "subject_id",           # Account for within-subject correlation
+  n_pc = 10
+)
+```
+
+**How blocking works:**
+- Regresses out the blocking variable before testing associations
+- All other variables (sex, age, treatment, etc.) are tested with this adjustment
+- Use for repeated measures, family studies, paired samples, etc.
+
+## Customizing the Plot
+
+```{r customize}
+p <- ds.plotDrivers(
+  pcs = "pca_result",
+  vars = "clinical_vars",
+  datasources = conns,
+  n_pc = 10,
+  label = TRUE,                    # Show -log(p) values on tiles
+  sig_cutoff = 0.01,               # Stricter significance threshold
+  max_col = 15,                    # Fix color scale maximum
+  title = "PC Drivers Analysis",
+  legend = "bottom",
+  transpose_plot = TRUE,           # PCs on y-axis, variables on x-axis
+  drop_insignificant_x = TRUE,     # Remove PCs with no significant associations
+  drop_insignificant_y = TRUE      # Remove variables with no significant associations
+)
+
+print(p)
+```
+
+## Parametric vs Non-Parametric Tests
+
+```{r parametric}
+# Parametric tests (default)
+# - Continuous variables: Pearson correlation
+# - Categorical variables: ANOVA F-test
+p_param <- ds.plotDrivers(
+  pcs = "pca_result",
+  vars = "clinical_vars",
+  datasources = conns,
+  parametric = TRUE
+)
+
+# Non-parametric tests
+# - Continuous variables: Spearman correlation
+# - Categorical variables: Kruskal-Wallis test
+p_nonparam <- ds.plotDrivers(
+  pcs = "pca_result",
+  vars = "clinical_vars",
+  datasources = conns,
+  parametric = FALSE
+)
+```
+
+**Use non-parametric when:**
+- Data are skewed or have outliers
+- Small sample sizes
+- Ordinal variables
+- Assumptions of normality violated
+
+## Getting Results as Data
+
+```{r return_data}
+# Return results dataframe instead of plot
+results <- ds.plotDrivers(
+  pcs = "pca_result",
+  vars = "clinical_vars",
+  datasources = conns,
+  return_data = TRUE
+)
+
+# Examine results
+head(results$results)
+
+# Significant associations only
+significant <- results$results[results$results$Significant, ]
+print(significant)
+
+# Metadata
+str(results$metadata)
+results$metadata$n_sites          # Number of sites
+results$metadata$total_observations
+results$metadata$site_metadata    # Per-site information
+```
+
+# Alternative: Site-Specific PCA
+
+If you computed PCA **separately** at each site (not federated), you cannot combine results with meta-analysis because PCs have different meanings at each site.
+
+Instead, create comparison plots:
+
+```{r site_specific}
+library(dsSwissKnifeClient)
+
+# Compute PCA at each site independently
+# (dsSwissKnife does NOT do federated PCA)
+datashield.assign.expr(
+  conns = conns,
+  symbol = "site_pca",
+  expr = quote(dssPrincomp(
+    x = "expression_data",
+    scale = TRUE,
+    center = TRUE
+  ))
+)
+
+# Create side-by-side comparison
+p_comparison <- ds.plotDrivers(
+  pcs = "site_pca",
+  vars = "clinical_vars",
+  datasources = conns,
+  federated_pca = FALSE,    # PCs are site-specific
+  n_pc = 5,
+  title = "Site-by-Site Comparison"
+)
+
+print(p_comparison)
+```
+
+This creates a **faceted plot** with one panel per site, useful for:
+- Comparing patterns across sites
+- Identifying site-specific effects
+- Quality control
+
+# Interpretation Guide
+
+## Understanding the Heatmap
+
+- **Color intensity**: Strength of statistical evidence (-log₁₀ p-value)
+  - White = no evidence (p ≈ 1)
+  - Light blue = weak evidence (p between 0.05 and 0.1)
+  - Medium blue = moderate evidence (p between 0.01 and 0.05)
+  - Dark blue = strong evidence (p < 0.01)
+
+- **Black border**: Association passes significance threshold (p ≤ sig_cutoff)
+
+- **Missing tiles**: Not enough data to test (< 3 complete observations)
+
+## What the Plot Tells You
+
+### Technical Confounders
+Strong associations with early PCs (PC1, PC2) often indicate:
+- **Batch effects**: Sequencing batch, processing date
+- **Technical quality**: RNA quality (RIN), library size
+- **Platform effects**: Sequencing center, instrument
+
+**Action:** Consider batch correction if technical variables dominate
+
+### Biological Drivers
+Associations with biological variables reveal:
+- Which PCs capture biological variation
+- Which variables explain most variation
+- Unexpected relationships (may indicate data issues or novel biology)
+
+### Common Patterns
+
+**Pattern 1: Batch dominates PC1**
+```
+      PC1  PC2  PC3
+batch ███  ▓▓▓  ░░░
+age   ░░░  ▓▓▓  ███
+sex   ░░░  ░░░  ▓▓▓
+```
+→ Batch correction needed
+
+**Pattern 2: Disease status spans multiple PCs**
+```
+         PC1  PC2  PC3  PC4
+disease  ███  ███  ▓▓▓  ▓▓▓
+```
+→ Disease explains substantial variation, use multiple PCs in downstream analysis
+
+**Pattern 3: No associations**
+```
+      PC1  PC2  PC3
+var1  ░░░  ░░░  ░░░
+var2  ░░░  ░░░  ░░░
+```
+→ May need more PCs, different variables, or larger sample
+
+# Practical Example
+
+Complete analysis workflow:
+
+```{r complete_workflow}
+# 1. Connect to sites
+conns <- datashield.login(...)
+
+# 2. Load and prepare data
+datashield.assign.table(conns, "counts", "PROJECT.COUNTS")
+datashield.assign.table(conns, "clinical", "PROJECT.CLINICAL")
+
+# 3. Compute federated PCA
+library(dsMLClient)
+datashield.assign.expr(conns, "pca",
+  quote(ds.PCA("counts", ncomp = 20, scale = TRUE, center = TRUE)))
+
+# 4. Check for technical confounders
+p_tech <- ds.plotDrivers(
+  pcs = "pca",
+  vars = "technical_vars",  # batch, date, RIN, etc.
+  datasources = conns,
+  n_pc = 10,
+  p_adj = "BH",
+  title = "Technical Confounders Check"
+)
+
+# 5. Analyze biological associations
+p_bio <- ds.plotDrivers(
+  pcs = "pca",
+  vars = "clinical",
+  datasources = conns,
+  n_pc = 10,
+  p_adj = "BH",
+  title = "Biological Drivers"
+)
+
+# 6. Identify PCs associated with outcome
+results <- ds.plotDrivers(
+  pcs = "pca",
+  vars = "clinical",
+  datasources = conns,
+  return_data = TRUE
+)
+
+disease_pcs <- results$results %>%
+  filter(Feature == "disease_status" & Significant) %>%
+  pull(PC) %>%
+  unique()
+
+print(paste("Disease-associated PCs:", paste(disease_pcs, collapse = ", ")))
+
+# 7. Use these PCs in downstream analysis
+# (differential expression, prediction, etc.)
+```
+
+# Troubleshooting
+
+## Error: Object not found on server
+
+```{r troubleshoot1, eval=FALSE}
+# Check available objects
+datashield.symbols(conns)
+
+# Or use aggregate to list
+datashield.aggregate(conns, call("ls"))
+```
+
+## Error: PCs not federated
+
+This occurs when PC names differ across sites, indicating non-federated PCA.
+
+**Solution:**
+```{r troubleshoot2, eval=FALSE}
+# Use federated_pca = FALSE for comparison
+ds.plotDrivers(..., federated_pca = FALSE)
+
+# Or ensure using dsML for federated PCA
+```
+
+## Warning: Variables differ across sites
+
+Some variables may not be available at all sites.
+
+```{r troubleshoot3, eval=FALSE}
+# Check which variables are available at each site
+for (i in seq_along(conns)) {
+  vars <- datashield.aggregate(
+    conns[i],
+    call("colnames", as.symbol("clinical_vars"))
+  )
+  cat("Site", i, ":", paste(vars[[1]], collapse = ", "), "\n")
+}
+```
+
+Meta-analysis includes only common variables.
+
+## No significant associations
+
+**Possible reasons:**
+1. Sample size too small → combine more sites
+2. Need more PCs → increase `n_pc`
+3. Variables not biologically relevant
+4. Too strict multiple testing → try `p_adj = "BH"` instead of "bonferroni"
+
+# Technical Details
+
+## Statistical Tests
+
+### Continuous Variables
+- **Parametric**: Pearson correlation
+- **Non-parametric**: Spearman correlation  
+- **With blocking**: Partial correlation (residuals after regressing out block)
+
+### Categorical Variables
+- **Parametric**: ANOVA F-test
+- **Non-parametric**: Kruskal-Wallis test
+- **With blocking**: Repeated measures ANOVA
+
+### Multi-Site Combination
+
+**Weighted Fisher's method** (default):
+- Test statistic: Σ(w_i × -2 × log(p_i))
+- Weights: w_i = n_i / Σn_i (sample size proportion)
+- Effective df: (Σw_i)² / Σ(w_i²) × 2
+- More power when sample sizes differ
+
+**Standard Fisher's method**:
+- Test statistic: -2 × Σlog(p_i)
+- Degrees of freedom: 2k (k = number of sites)
+- Equal weight for all sites
+
+## Privacy Guarantees
+
+**What leaves the server:**
+- ✓ P-values (aggregate statistics)
+- ✓ Number of observations
+- ✓ PC and variable names
+
+**What stays on server:**
+- ✗ Individual PC scores
+- ✗ Individual variable values
+- ✗ Raw expression data
+- ✗ Covariance matrices
+
+# References
+
+1. Fisher, R.A. (1932). Statistical Methods for Research Workers. Oliver & Boyd.
+2. Kost, J.T. & McDermott, M.P. (2002). Combining dependent P-values. Statistics & Probability Letters, 60(2), 183-190.
+3. DataSHIELD: <https://www.datashield.org>
+4. dsML package: <https://github.com/isglobal-brge/dsML>
+5. dsSwissKnife package: <https://github.com/sib-swiss/dsSwissKnife>
+
+# Session Info
+
+```{r session_info}
+sessionInfo()
+```
+
+# Cleanup
+
+```{r cleanup}
+datashield.logout(conns)
+```

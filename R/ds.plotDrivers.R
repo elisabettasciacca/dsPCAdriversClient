@@ -59,19 +59,19 @@
 #'   associations? Default FALSE.
 #' @param drop_insignificant_y Logical. Remove variables with no significant
 #'   associations? Default FALSE.
-#' @param return_data Logical. Return results data frame(s) instead of a plot?
+#' @param return_pvalues Logical. Return results data frame(s) instead of a plot?
 #'   Default FALSE.
 #' @param verbose Logical. Print diagnostic messages from the server? Default
 #'   FALSE.
 #'
 #' @return
-#' When \code{return_data = FALSE} (default):
+#' When \code{return_pvalues = FALSE} (default):
 #' \itemize{
 #'   \item \code{type = "combine"}: a single \code{ggplot2} heatmap.
 #'   \item \code{type = "split"}: a single \code{ggplot2} heatmap faceted by
 #'     site.
 #' }
-#' When \code{return_data = TRUE}, a list containing:
+#' When \code{return_pvalues = TRUE}, a list containing:
 #' \itemize{
 #'   \item \code{results}: data frame (or named list of data frames for
 #'     \code{type = "split"} with multiple sites) with columns
@@ -151,11 +151,12 @@
 #'   vars        = "clinical",
 #'   datasources = conns,
 #'   type        = "combine",
-#'   return_data = TRUE
+#'   return_pvalues = TRUE
 #' )
 #' head(res$results)
 #' }
 #'
+#' @export
 ds.plotDrivers <- function(data = NULL,
                            vars = NULL,
                            datasources = NULL,
@@ -174,7 +175,7 @@ ds.plotDrivers <- function(data = NULL,
                            transpose_plot = FALSE,
                            drop_insignificant_x = FALSE,
                            drop_insignificant_y = FALSE,
-                           return_data = FALSE,
+                           return_pvalues = FALSE,
                            verbose = FALSE) {
 
   # Validate input data
@@ -246,62 +247,50 @@ ds.plotDrivers <- function(data = NULL,
     )
   })
 
-  # Single server: always return a single plot -----------------------------------
-
-  if (length(datasources) == 1) {
-    results  <- site_results[[1]]
-    pc_names <- site_metadata[[1]]$pc_names
-    var_names <- site_metadata[[1]]$var_names
-    n_obs    <- site_metadata[[1]]$n_observations
-
-    results$Significant <- results$pvalue <= sig_cutoff
-    results$Feature     <- factor(results$Feature, levels = var_names)
-    results$PC          <- factor(results$PC,      levels = pc_names)
-
-    if (return_data) {
-      return(list(
-        results  = results,
-        metadata = list(pc_names = pc_names, var_names = var_names,
-                        n_observations = n_obs)
-      ))
-    }
-
-    if (drop_insignificant_x) {
-      results <- results[results$PC %in% unique(results$PC[results$Significant]), ]
-    }
-    if (drop_insignificant_y) {
-      results <- results[results$Feature %in% unique(results$Feature[results$Significant]), ]
-    }
-
-    return(build_drivers_plot(results, sig_cutoff, p_adj, max_col, title,
-                              legend, transpose_plot, label))
-  }
-
-  # Multiple servers, type = "split" --------------------------------------------
 
   if (type == "split") {
 
-    message("type = 'split': returning separate plots per site.")
+    if (length(datasources) > 1) {
+      message("type = 'split': returning separate plots per site.")
+    }
 
     site_results_labelled <- lapply(names(site_results), function(site_name) {
       res  <- site_results[[site_name]]
       meta <- site_metadata[[site_name]]
 
-      res$Significant <- res$pvalue <= sig_cutoff
+      res$Significant <- !is.na(res$pvalue) & res$pvalue <= sig_cutoff
       res$Feature     <- factor(res$Feature, levels = meta$var_names)
       res$PC          <- factor(res$PC,      levels = meta$pc_names)
-      res$Site        <- site_name
+      if (length(datasources) > 1) res$Site <- site_name
       return(res)
     })
 
-    combined_df <- do.call(rbind, site_results_labelled)
-
-    if (return_data) {
+    if (return_pvalues) {
+      if (length(datasources) == 1) {
+        return(list(
+          results  = site_results_labelled[[1]],
+          metadata = site_metadata[[1]]
+        ))
+      }
       return(list(
         results  = setNames(site_results_labelled, names(site_results)),
         metadata = site_metadata
       ))
     }
+
+    if (length(datasources) == 1) {
+      results <- site_results_labelled[[1]]
+      if (drop_insignificant_x) {
+        results <- results[results$PC %in% unique(results$PC[results$Significant]), ]
+      }
+      if (drop_insignificant_y) {
+        results <- results[results$Feature %in% unique(results$Feature[results$Significant]), ]
+      }
+      return(build_drivers_plot(results, sig_cutoff, p_adj, max_col, title,
+                                legend, transpose_plot, label))
+    }
+
+    combined_df <- do.call(rbind, site_results_labelled)
 
     if (drop_insignificant_x) {
       combined_df <- combined_df[
@@ -312,14 +301,15 @@ ds.plotDrivers <- function(data = NULL,
         combined_df$Feature %in% unique(combined_df$Feature[combined_df$Significant]), ]
     }
 
-    return(build_multisite_comparison_plot(combined_df, sig_cutoff, p_adj, max_col,
-                                           title, legend, transpose_plot, label))
+    return(build_drivers_plot(combined_df, sig_cutoff, p_adj, max_col,
+                              title, legend, transpose_plot, label, faceted = TRUE))
   }
 
-  # Multiple servers, type = "combine" ------------------------------------------
-
-  message("Combining associations across ", length(datasources), " sites ",
-          "(Fisher's method).")
+  # Multiple servers, type = "combine"
+  if (length(datasources) > 1) {
+    message("Combining associations across ", length(datasources), " sites ",
+            "(Fisher's method).")
+  }
 
   # Sanity check: with federated PCA, PC names must be identical across sites
   validate_federated_pcs(site_metadata)
@@ -331,14 +321,14 @@ ds.plotDrivers <- function(data = NULL,
     combined_results$Association <- -log10(combined_results$pvalue)
   }
 
-  combined_results$Significant <- combined_results$pvalue <= sig_cutoff
+  combined_results$Significant <- !is.na(combined_results$pvalue) & combined_results$pvalue <= sig_cutoff
   combined_results$Feature     <- factor(combined_results$Feature,
                                          levels = site_metadata[[1]]$var_names)
   combined_results$PC          <- factor(combined_results$PC,
                                          levels = site_metadata[[1]]$pc_names)
 
-  if (return_data) {
-    total_n <- sum(sapply(site_metadata, function(x) x$n_observations))
+  if (return_pvalues) {
+    total_n <- sum(vapply(site_metadata, function(x) x$n_observations, integer(1)))
     return(list(
       results  = combined_results,
       metadata = list(
@@ -359,7 +349,7 @@ ds.plotDrivers <- function(data = NULL,
   }
 
   if (title == "Variation By Feature") {
-    total_n <- sum(sapply(site_metadata, function(x) x$n_observations))
+    total_n <- sum(vapply(site_metadata, function(x) x$n_observations, integer(1)))
     title   <- paste0("Variation By Feature (",
                       length(datasources), " sites, N=", total_n, ")")
   }
@@ -423,9 +413,7 @@ combine_pvalues_fisher <- function(site_results, site_metadata) {
     stringsAsFactors = FALSE
   )
 
-  combinations$pvalue <- apply(combinations, 1, function(row) {
-    feat <- row["Feature"]
-    pc   <- row["PC"]
+  combinations$pvalue <- mapply(function(feat, pc) {
 
     pvals <- vapply(site_results, function(site_data) {
       idx <- which(site_data$Feature == feat & site_data$PC == pc)
@@ -448,7 +436,8 @@ combine_pvalues_fisher <- function(site_results, site_metadata) {
     combined_p  <- pchisq(fisher_stat, df = 2 * length(pvals), lower.tail = FALSE)
 
     return(combined_p)
-  })
+
+  }, feat = combinations$Feature, pc = combinations$PC)
 
   combinations$Association <- -log10(combinations$pvalue)
   return(combinations)
@@ -456,74 +445,12 @@ combine_pvalues_fisher <- function(site_results, site_metadata) {
 
 
 #' @importFrom ggplot2 ggplot aes geom_tile geom_text coord_equal facet_wrap
-#' scale_fill_gradientn scale_colour_manual guides guide_legend labs theme_bw
-#' theme element_text element_rect
-#' @noRd
-build_multisite_comparison_plot <- function(results, sig_cutoff, p_adj, max_col,
-                                            title, legend, transpose_plot, label) {
-  if (is.null(max_col)) {
-    max_col <- max(ceiling(results$Association), na.rm = TRUE)
-  }
-
-  results$x <- if (transpose_plot) results$Feature else results$PC
-  results$y <- if (transpose_plot) results$PC      else results$Feature
-
-  leg_lab <- if (!is.null(p_adj)) {
-    expression(-log[10](italic(p)[adj]))
-  } else {
-    expression(-log[10](italic(p)))
-  }
-
-  p <- ggplot(
-    results,
-    aes(x = x, y = y, fill = Association, colour = Significant)
-  ) +
-    geom_tile(linewidth = 0.5, width = 0.9, height = 0.9) +
-    coord_equal() +
-    facet_wrap(~ Site) +
-    scale_fill_gradientn(
-      colours = c("white", "dodgerblue1", "dodgerblue3", "dodgerblue4"),
-      name    = leg_lab,
-      limits  = c(0, max_col)
-    ) +
-    scale_colour_manual(
-      values = c("grey90", "black"),
-      labels = c(
-        paste(ifelse(is.null(p_adj), "p", "p adj"), ">",  sig_cutoff),
-        paste(ifelse(is.null(p_adj), "p", "p adj"), "<=", sig_cutoff)
-      ),
-      name = ""
-    ) +
-    guides(
-      colour = guide_legend(override.aes = list(fill = "white"))
-    ) +
-    labs(title = title, x = "", y = "") +
-    theme_bw() +
-    theme(
-      plot.title       = element_text(hjust = 0.5),
-      axis.text.x      = element_text(
-        angle = ifelse(transpose_plot, 315, 0),
-        hjust = ifelse(transpose_plot, 0, 0.5)),
-      legend.position  = legend,
-      strip.background = element_rect(fill = "grey90")
-    )
-
-  if (label) {
-    p <- p + geom_text(
-      aes(label = round(Association, 2)),
-      colour = "black", size = 2.5
-    )
-  }
-
-  return(p)
-}
-
-#' @importFrom ggplot2 ggplot aes geom_tile geom_text coord_equal guides
-#'  scale_fill_gradientn scale_colour_manual guide_legend labs theme_bw theme
-#'  element_text
+#'  scale_fill_gradientn scale_colour_manual guides guide_legend labs theme_bw
+#'  theme element_text element_rect
 #' @noRd
 build_drivers_plot <- function(results, sig_cutoff, p_adj, max_col,
-                               title, legend, transpose_plot, label) {
+                               title, legend, transpose_plot, label,
+                               faceted = FALSE) {
   if (is.null(max_col)) {
     max_col <- max(ceiling(results$Association), na.rm = TRUE)
   }
@@ -532,16 +459,16 @@ build_drivers_plot <- function(results, sig_cutoff, p_adj, max_col,
   results$y <- if (transpose_plot) results$PC      else results$Feature
 
   leg_lab <- if (!is.null(p_adj)) {
-    expression(-log[10](italic(p)[adj]))
+    expression(-log[10](p[adj]))
   } else {
-    expression(-log[10](italic(p)))
+    expression(-log[10](p))
   }
 
   p <- ggplot(
     results,
     aes(x = x, y = y, fill = Association, colour = Significant)
   ) +
-    geom_tile(linewidth = 1, width = 0.9, height = 0.9) +
+    geom_tile(linewidth = if (faceted) 0.5 else 1, width = 0.9, height = 0.9) +
     coord_equal() +
     scale_fill_gradientn(
       colours = c("white", "dodgerblue1", "dodgerblue3", "dodgerblue4"),
@@ -563,16 +490,28 @@ build_drivers_plot <- function(results, sig_cutoff, p_adj, max_col,
     theme_bw() +
     theme(
       plot.title      = element_text(hjust = 0.5),
-      axis.text.x      = element_text(
+      axis.text.x     = element_text(
         angle = ifelse(transpose_plot, 315, 0),
         hjust = ifelse(transpose_plot, 0, 0.5)),
+      axis.text.y     = element_text(size = 11),
       legend.position = legend
     )
+
+  if (faceted) {
+    p <- p +
+      facet_wrap(~ Site) +
+      theme(
+        strip.background = element_rect(fill = "#dce8f0", colour = "grey70"),
+        strip.text       = element_text(face = "bold", size = 10),
+        panel.spacing    = unit(1, "lines")
+      )
+  }
 
   if (label) {
     p <- p + geom_text(
       aes(label = round(Association, 2)),
-      colour = "black", size = 3
+      colour = "black",
+      size   = if (faceted) 2.5 else 3
     )
   }
 
