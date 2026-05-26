@@ -444,10 +444,29 @@ combine_pvalues_fisher <- function(site_results, site_metadata) {
 }
 
 
+#' @title Build the PCA drivers heatmap
+#'
+#' @description Internal helper that constructs the ggplot heatmap of
+#'   variable-PC associations used by \code{ds.plotDrivers}. Handles
+#'   significance highlighting, p value adjustment annotations, axis
+#'   transposition and optional faceting by study.
+#'
+#' @param results Data frame of associations returned by the aggregation step.
+#' @param sig_cutoff Numeric. Significance threshold on -log10(p).
+#' @param p_adj Character. Method used for p value adjustment (for labelling).
+#' @param max_col Numeric or \code{NULL}. Upper limit for the colour scale.
+#' @param title Character. Plot title.
+#' @param legend Logical. Whether to display the legend.
+#' @param transpose_plot Logical. If \code{TRUE}, swap features and PCs on the axes.
+#' @param label Character. Label shown next to significant cells.
+#' @param faceted Logical. If \code{TRUE}, facet the plot by study.
+#'
+#' @return A \code{ggplot} object.
+#'
 #' @importFrom ggplot2 ggplot aes geom_tile geom_text coord_equal facet_wrap
 #'  scale_fill_gradientn scale_colour_manual guides guide_legend labs theme_bw
 #'  theme element_text element_rect
-#' @noRd
+#' @keywords internal
 build_drivers_plot <- function(results, sig_cutoff, p_adj, max_col,
                                title, legend, transpose_plot, label,
                                faceted = FALSE) {
