@@ -64,12 +64,14 @@ server. Source code is available at
 # Install the client package
 devtools::install_github("elisabettasciacca/dsPCAdriversClient")
 
-# The server-side package must be installed on each DataSHIELD server
-# by the server administrator:
-# devtools::install_github("elisabettasciacca/dsPCAdrivers")
+
 ```
 
-
+The server-side package must be installed on each DataSHIELD server by the server administrator:
+```
+devtools::install_github("elisabettasciacca/dsPCAdrivers")
+```
+   
 ---
 
 
@@ -171,7 +173,7 @@ would double-count the contribution of larger sites.
 
 **Note: after the function returns, the PC scores are retained on each server as `"expression_data_scores"` and are available for downstream analyses.**
 
-```{r dslite-combine, eval = run_dslite}
+```{r dslite-combine, eval = run_dslite, fig.width=5}
 ds.plotDrivers(
   data        = "expression_data",
   vars        = "clinical_vars",
@@ -274,7 +276,12 @@ ds.plotDrivers(
 )
 ```
 
-<!-- INSERT PLOT: federated analysis output -->
+<p>&nbsp;</p>
+![](dsDriversPCA_combined.png){width=70% style="display: block; margin: auto;"}
+
+Tile colour encodes association strength as $-\log_{10}(p)$: white indicates no
+evidence (p ≈ 1) and dark blue indicates strong evidence (p << 0.05). A black
+border marks tiles where p ≤ `sig_cutoff`.
 
 ### Site-specific analysis
 
@@ -288,8 +295,12 @@ ds.plotDrivers(
   sig_cutoff  = 0.05
 )
 ```
+<p>&nbsp;</p>
+![](dsDriversPCA_split.png){width=70% style="display: block; margin: auto;"}
 
-<!-- INSERT PLOT: site-specific analysis output -->
+Tile colour encodes association strength as $-\log_{10}(p)$: white indicates no
+evidence (p ≈ 1) and dark blue indicates strong evidence (p << 0.05). A black
+border marks tiles where p ≤ `sig_cutoff`.
 
 # Part 3: Additional notes 
 
