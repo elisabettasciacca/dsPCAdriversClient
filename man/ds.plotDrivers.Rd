@@ -34,7 +34,7 @@ server(s) on which PCA will be computed. The matrix must have
 Note that omic matrices (e.g. RNAseq)
 are typically stored in the opposite orientation (features x samples) and
 must be transposed before use (e.g. via \code{datashield.assign(conns,
-  "expr_t", quote(t(expr)))}). Only numeric columns are used by
+"expr_t", quote(t(expr)))}). Only numeric columns are used by
 \code{dssPrincomp}.}
 
 \item{vars}{Character string. Name of the variables (predictors) data frame on the
@@ -68,7 +68,9 @@ TRUE.}
 
 \item{n_pc}{Integer. Number of principal components to include. Default 5.}
 
-\item{label}{Logical. Print association values on tiles? Default FALSE.}
+\item{label}{Logical. Print the p value (or adjusted p value, if
+\code{p_adj} is set) on each tile, in scientific notation with two
+decimal places (e.g. \code{3.12e-4})? Default FALSE.}
 
 \item{sig_cutoff}{Numeric. Significance threshold for outlining tiles. Default
 0.05.}
@@ -117,8 +119,9 @@ When \code{return_pvalues = TRUE}, a list containing:
 \itemize{
 \item \code{results}: data frame (or named list of data frames for
 \code{type = "split"} with multiple sites) with columns
-\code{Feature}, \code{PC}, \code{pvalue}, \code{Association},
-\code{Significant}.
+\code{Feature}, \code{PC}, \code{pvalue} (always the raw, unadjusted
+p value), \code{Significant}, plus \code{pvalue_adj} (the adjusted p
+value) when \code{p_adj} is not \code{NULL}.
 \item \code{metadata}: list with summary information (n per site, method,
 etc.).
 }
@@ -126,7 +129,7 @@ etc.).
 \description{
 Client-side function to visualise associations between principal
 components and variables in a federated setting. PCA is computed internally
-via \code{dsSwissKnifeClient::dssPrincomp} — no pre-existing PCA object is
+via \code{dsSwissKnifeClient::dssPrincomp} - no pre-existing PCA object is
 required. Only aggregate statistics (p values) leave the servers.
 }
 \details{
@@ -155,7 +158,9 @@ resulting PCs may differ in direction and magnitude across sites, so p values
 are \emph{not} combined. Results are shown as a faceted plot.
 
 Association strength is visualised as \eqn{-\log_{10}(p)}. Tiles are outlined
-in black when p (or adjusted p) \eqn{\leq} \code{sig_cutoff}.
+in black when p (or adjusted p) \eqn{\leq} \code{sig_cutoff}. When
+\code{label = TRUE}, the p value (or adjusted p value) is printed on each
+tile, in scientific notation with two decimal places (e.g. \code{3.12e-4}).
 }
 \examples{
 \dontrun{

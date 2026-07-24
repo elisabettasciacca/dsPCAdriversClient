@@ -84,9 +84,7 @@ entirely within a single R session and implements the same DSI interface as a
 real Opal server, so no network access is required.
 
 The examples below use the `site_data` dataset included in the package, which
-simulates two-site federated RNA-seq data with a known biological structure:
-disease cases upregulate the first 15 genes, and sequencing batch introduces a
-shift in the first 8 genes.
+simulates two-site federated RNA-seq data.
 
 ### Setting up DSLite
 
@@ -356,7 +354,7 @@ ds.plotDrivers(
 Several aspects of the output can be adjusted:
   
 - The colour scale maximum can be fixed with `max_col`; 
-- Tile labels showing the raw $-\log_{10}(p)$ values can be enabled with `label = TRUE`; 
+- Tile labels showing the p value (or adjusted p value, if `p_adj` is set), in scientific notation with two decimal places (e.g. `3.12e-4`), can be enabled with `label = TRUE`;
 - The axis orientation can be transposed so that PCs appear on the y-axis and variables on the x-axis;
 - To reduce visual clutter, PCs or variables with no significant associations can be dropped from the plot
 entirely using `drop_insignificant_x` and `drop_insignificant_y`.
@@ -367,9 +365,9 @@ ds.plotDrivers(
   vars                 = "clinical_vars",
   datasources          = conns,
   n_pc                 = 10,
-  sig_cutoff           = 0.01,
-  label                = TRUE,         # print -log10(p) values on tiles
-  max_col              = 15,           # fix colour scale maximum
+  sig_cutoff           = 0.06,
+  label                = TRUE,         # print p values on tiles 
+  max_col              = 30,           # fix colour scale maximum
   title                = "Drivers of variation",
   legend               = "bottom",
   transpose_plot       = TRUE,         # PCs on y-axis, variables on x-axis
@@ -377,6 +375,9 @@ ds.plotDrivers(
   drop_insignificant_y = TRUE          # remove variables with no significant associations
 )
 ```
+<p>&nbsp;</p>
+![](dsDriversPCA_combined2.png){width=70% style="display: block; margin: auto;"}
+
 
 ## Returning results as a data frame
 
@@ -391,7 +392,7 @@ res <- ds.plotDrivers(
   return_pvalues = TRUE
 )
 
-# Columns: Feature, PC, pvalue, Association (-log10 p), Significant
+# Columns: Feature, PC, pvalue, Significant, plus pvalue_adj if p_adj is set
 head(res$results)
 
 # Significant associations only

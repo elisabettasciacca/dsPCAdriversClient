@@ -4,18 +4,17 @@ Version: 0.0.0.9000
 Authors@R: 
     person("Elisabetta", "Sciacca", , "e.sciacca@qmul.ac.uk", role = c("aut", "cre"))
 Description: Generate tile plots showing correlations between PCs and variables - Client Side.
-License: LGPL (>= 3)
+License: GPL-3
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.3
 Imports:
     DSI,
     ggplot2 (>= 3.0.0),
-    dplyr
+    grid,
+    rlang
 Suggests:
     knitr,
     rmarkdown,
-    dsMLClient,
     dsSwissKnifeClient,
     testthat (>= 3.0.0),
     withr,
@@ -31,3 +30,4 @@ Additional_repositories: https://cran.obiba.org/
 Depends: 
     R (>= 3.5)
 LazyData: true
+Config/roxygen2/version: 8.0.0

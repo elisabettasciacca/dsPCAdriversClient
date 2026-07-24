@@ -17,11 +17,15 @@ build_drivers_plot(
 )
 }
 \arguments{
-\item{results}{Data frame of associations returned by the aggregation step.}
+\item{results}{Data frame of associations returned by the aggregation step.
+Must contain a \code{pvalue} column and, when \code{p_adj} is not
+\code{NULL}, a \code{pvalue_adj} column.}
 
 \item{sig_cutoff}{Numeric. Significance threshold on -log10(p).}
 
-\item{p_adj}{Character. Method used for p value adjustment (for labelling).}
+\item{p_adj}{Character. Method used for p value adjustment. Also selects
+whether \code{pvalue} or \code{pvalue_adj} drives colour, label and
+significance highlighting.}
 
 \item{max_col}{Numeric or \code{NULL}. Upper limit for the colour scale.}
 
@@ -31,7 +35,8 @@ build_drivers_plot(
 
 \item{transpose_plot}{Logical. If \code{TRUE}, swap features and PCs on the axes.}
 
-\item{label}{Character. Label shown next to significant cells.}
+\item{label}{Logical. If \code{TRUE}, print the p value (or adjusted p
+value) on each tile, in scientific notation with two decimal places.}
 
 \item{faceted}{Logical. If \code{TRUE}, facet the plot by study.}
 }

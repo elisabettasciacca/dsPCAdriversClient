@@ -111,8 +111,10 @@ test_that("ds.plotDrivers returns a results / metadata list when return_pvalues 
   expect_type(out, "list")
   expect_named(out, c("results", "metadata"), ignore.order = TRUE)
   expect_s3_class(out$results, "data.frame")
-  expect_true(all(c("Feature", "PC", "pvalue", "Association", "Significant")
+  expect_true(all(c("Feature", "PC", "pvalue", "Significant")
                   %in% colnames(out$results)))
+  # No p_adj was requested, so there is no pvalue_adj column.
+  expect_false("pvalue_adj" %in% colnames(out$results))
 
   expect_equal(out$metadata$n_sites, 2L)
   expect_equal(out$metadata$meta_method, "fisher")
@@ -200,17 +202,119 @@ test_that("ds.plotDrivers applies p_adj after Fisher combination", {
     p_adj = "BH", return_pvalues = TRUE
   )
 
-  # Same Feature x PC structure across both calls
+  # pvalue_adj is added only when p_adj is requested - not a spurious extra
+  # or missing column either way.
+  expect_named(raw$results, c("Feature", "PC", "pvalue", "Significant"),
+               ignore.order = TRUE)
+  expect_named(adj$results, c("Feature", "PC", "pvalue", "pvalue_adj", "Significant"),
+               ignore.order = TRUE)
+
+  # pvalue always stays raw, regardless of whether p_adj was requested
   ok <- !is.na(raw$results$pvalue) & !is.na(adj$results$pvalue)
   expect_true(any(ok))
+  expect_equal(adj$results$pvalue[ok], raw$results$pvalue[ok])
 
-  # BH-adjusted p values are always >= raw p values
-  expect_true(all(adj$results$pvalue[ok] >= raw$results$pvalue[ok] - 1e-12))
+  # pvalue_adj is >= the raw p value
+  ok_adj <- ok & !is.na(adj$results$pvalue_adj)
+  expect_true(all(adj$results$pvalue_adj[ok_adj] >= adj$results$pvalue[ok_adj] - 1e-12))
+})
 
-  # Association recomputed from adjusted p values
-  expect_equal(adj$results$Association[ok],
-               -log10(adj$results$pvalue[ok]),
-               tolerance = 1e-10)
+test_that("ds.plotDrivers (split) includes pvalue_adj when p_adj is set", {
+
+  setup <- setup_two_site_dslite()
+  conns <- setup$conns
+  withr::defer(DSI::datashield.logout(conns))
+
+  out <- ds.plotDrivers(
+    data = "expr", vars = "clinical", datasources = conns,
+    type = "split", n_pc = 3L,
+    p_adj = "BH", return_pvalues = TRUE
+  )
+
+  # Adjustment happens independently per site for type = "split"
+  for (site_res in out$results) {
+    expect_named(site_res,
+                 c("Feature", "PC", "pvalue", "pvalue_adj", "Significant", "Site"),
+                 ignore.order = TRUE)
+    ok <- !is.na(site_res$pvalue) & !is.na(site_res$pvalue_adj)
+    expect_true(all(site_res$pvalue_adj[ok] >= site_res$pvalue[ok] - 1e-12))
+  }
+})
+
+test_that("ds.plotDrivers does not double-adjust p values with a single datasource", {
+
+  setup <- setup_single_site_dslite()
+  conns <- setup$conns
+  withr::defer(DSI::datashield.logout(conns))
+
+  # type = "combine" with a single site: combining is the identity operation,
+  # and the adjustment happens once, server-side (see server_p_adj in
+  # ds.plotDrivers). Applying p.adjust() again here on the already-adjusted
+  # pvalue_adj must reproduce the same values (not a further-inflated result).
+  out <- ds.plotDrivers(
+    data = "expr", vars = "clinical", datasources = conns,
+    type = "combine", n_pc = 3L,
+    p_adj = "BH", return_pvalues = TRUE
+  )
+
+  res <- out$results
+  expect_named(res, c("Feature", "PC", "pvalue", "pvalue_adj", "Significant"),
+               ignore.order = TRUE)
+
+  ok <- !is.na(res$pvalue)
+  expected_adj <- stats::p.adjust(res$pvalue[ok], method = "BH")
+  expect_equal(res$pvalue_adj[ok], expected_adj)
+})
+
+test_that("ds.plotDrivers (combine, n_pc = 5) reproduces known p values for site_data", {
+
+  setup <- setup_two_site_dslite()
+  conns <- setup$conns
+  withr::defer(DSI::datashield.logout(conns))
+
+  out <- ds.plotDrivers(
+    data           = "expr",
+    vars           = "clinical",
+    datasources    = conns,
+    type           = "combine",
+    n_pc           = 5L,
+    sig_cutoff     = 0.05,
+    return_pvalues = TRUE
+  )
+
+  res <- out$results
+
+  # 6 clinical variables x 5 PCs
+  expect_equal(nrow(res), 30L)
+
+  # No p_adj was requested, so there is no pvalue_adj column.
+  expect_false("pvalue_adj" %in% colnames(res))
+
+  get_row <- function(feature, pc) res[res$Feature == feature & res$PC == pc, ]
+
+  # disease_status is an overwhelming driver of PC1 (p ~ 1e-29)
+  row <- get_row("disease_status", "PC1")
+  expect_lt(row$pvalue, 1e-20)
+  expect_true(row$Significant)
+
+  # age is not associated with PC1 (p ~ 0.26)
+  row <- get_row("age", "PC1")
+  expect_equal(row$pvalue, 0.26, tolerance = 0.02)
+  expect_false(row$Significant)
+
+  # batch is essentially unrelated to PC1 (p ~ 0.85)
+  row <- get_row("batch", "PC1")
+  expect_equal(row$pvalue, 0.85, tolerance = 0.05)
+  expect_false(row$Significant)
+
+  # age is borderline-significant on PC4 (p ~ 0.046, just under the 0.05 cutoff).
+  # An absolute range check is used here rather than expect_equal(tolerance = ...):
+  # testthat/waldo tolerance is relative, so on a value this small a tolerance
+  # wide enough to be useful would barely constrain anything.
+  row <- get_row("age", "PC4")
+  expect_gt(row$pvalue, 0.03)
+  expect_lt(row$pvalue, 0.05)
+  expect_true(row$Significant)
 })
 
 test_that("ds.plotDrivers leaves the PCA scores object on each server", {

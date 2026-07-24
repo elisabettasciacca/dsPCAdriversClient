@@ -133,14 +133,18 @@ test_that("combine_pvalues_fisher produces one row per Feature x PC combination"
     fakes$site_results, fakes$site_metadata
   )
   expect_equal(nrow(combined), 4)
-  expect_named(combined, c("Feature", "PC", "pvalue", "Association"),
-               ignore.order = TRUE)
-  # Association = -log10(p)
-  ok <- !is.na(combined$pvalue)
-  expect_equal(combined$Association[ok], -log10(combined$pvalue[ok]),
-               tolerance = 1e-12)
+  expect_named(combined, c("Feature", "PC", "pvalue"), ignore.order = TRUE)
 })
 
+
+# format_pval_sci --------------------------------------------------------------
+
+test_that("format_pval_sci formats p values as scientific notation with no zero-padded exponent", {
+  expect_equal(dsPCAdriversClient:::format_pval_sci(3.123e-4), "3.12e-4")
+  expect_equal(dsPCAdriversClient:::format_pval_sci(9.892336e-29), "9.89e-29")
+  expect_equal(dsPCAdriversClient:::format_pval_sci(0.05), "5.00e-2")
+  expect_true(is.na(dsPCAdriversClient:::format_pval_sci(NA_real_)))
+})
 
 # build_drivers_plot ----------------------------------------------------------
 
@@ -153,7 +157,7 @@ make_results_df <- function(with_site = FALSE) {
   )
   set.seed(1)
   res$pvalue      <- stats::runif(nrow(res))
-  res$Association <- -log10(res$pvalue)
+  res$pvalue_adj  <- res$pvalue / 2  # arbitrary but distinguishable from pvalue
   res$Significant <- res$pvalue <= 0.5
   if (with_site) res$Site <- rep(c("site1", "site2"),
                                  length.out = nrow(res))
@@ -239,6 +243,21 @@ test_that("build_drivers_plot adds a geom_text layer when label = TRUE", {
   )
 
   expect_equal(length(p_label$layers), length(p_no_label$layers) + 1L)
+})
+
+test_that("build_drivers_plot labels tiles with the formatted p value", {
+  testthat::skip_if_not_installed("ggplot2")
+
+  res <- make_results_df()
+  p <- dsPCAdriversClient:::build_drivers_plot(
+    res, sig_cutoff = 0.05, p_adj = NULL, max_col = NULL,
+    title = "", legend = "right",
+    transpose_plot = FALSE, label = TRUE
+  )
+
+  label_layer_data <- ggplot2::layer_data(p, length(p$layers))
+  expect_equal(label_layer_data$label,
+               dsPCAdriversClient:::format_pval_sci(res$pvalue))
 })
 
 test_that("build_drivers_plot uses p adj legend label when p_adj is set", {

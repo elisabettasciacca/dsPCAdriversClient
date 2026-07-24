@@ -2,7 +2,7 @@
 #'
 #' @description Client-side function to visualise associations between principal
 #' components and variables in a federated setting. PCA is computed internally
-#' via \code{dsSwissKnifeClient::dssPrincomp} — no pre-existing PCA object is
+#' via \code{dsSwissKnifeClient::dssPrincomp} - no pre-existing PCA object is
 #' required. Only aggregate statistics (p values) leave the servers.
 #'
 #' @param data Character string. Name of the data matrix or data frame on the
@@ -37,7 +37,9 @@
 #'   If FALSE, uses rank-based alternatives (Spearman, Kruskal-Wallis). Default
 #'   TRUE.
 #' @param n_pc Integer. Number of principal components to include. Default 5.
-#' @param label Logical. Print association values on tiles? Default FALSE.
+#' @param label Logical. Print the p value (or adjusted p value, if
+#'   \code{p_adj} is set) on each tile, in scientific notation with two
+#'   decimal places (e.g. \code{3.12e-4})? Default FALSE.
 #' @param sig_cutoff Numeric. Significance threshold for outlining tiles. Default
 #'   0.05.
 #' @param p_adj Optional character. P value adjustment method: one of
@@ -75,8 +77,9 @@
 #' \itemize{
 #'   \item \code{results}: data frame (or named list of data frames for
 #'     \code{type = "split"} with multiple sites) with columns
-#'     \code{Feature}, \code{PC}, \code{pvalue}, \code{Association},
-#'     \code{Significant}.
+#'     \code{Feature}, \code{PC}, \code{pvalue} (always the raw, unadjusted
+#'     p value), \code{Significant}, plus \code{pvalue_adj} (the adjusted p
+#'     value) when \code{p_adj} is not \code{NULL}.
 #'   \item \code{metadata}: list with summary information (n per site, method,
 #'     etc.).
 #' }
@@ -107,7 +110,9 @@
 #' are \emph{not} combined. Results are shown as a faceted plot.
 #'
 #' Association strength is visualised as \eqn{-\log_{10}(p)}. Tiles are outlined
-#' in black when p (or adjusted p) \eqn{\leq} \code{sig_cutoff}.
+#' in black when p (or adjusted p) \eqn{\leq} \code{sig_cutoff}. When
+#' \code{label = TRUE}, the p value (or adjusted p value) is printed on each
+#' tile, in scientific notation with two decimal places (e.g. \code{3.12e-4}).
 #'
 #' @examples
 #' \dontrun{
@@ -156,6 +161,7 @@
 #' head(res$results)
 #' }
 #'
+#' @importFrom stats p.adjust pchisq setNames
 #' @export
 ds.plotDrivers <- function(data = NULL,
                            vars = NULL,
@@ -188,6 +194,11 @@ ds.plotDrivers <- function(data = NULL,
   if (!type %in% c("combine", "split")) {
     stop("'type' must be either 'combine' or 'split'.", call. = FALSE)
   }
+
+  # Name of the column that drives significance, plot colour/label and legend
+  # text: the raw p value, unless an adjustment method was requested, in
+  # which case the adjusted p value takes over everywhere.
+  sig_var <- if (is.null(p_adj)) "pvalue" else "pvalue_adj"
 
   # Check that data and vars exist on all servers
   invisible(lapply(names(datasources), function(ds_name) {
@@ -258,7 +269,7 @@ ds.plotDrivers <- function(data = NULL,
       res  <- site_results[[site_name]]
       meta <- site_metadata[[site_name]]
 
-      res$Significant <- !is.na(res$pvalue) & res$pvalue <= sig_cutoff
+      res$Significant <- !is.na(res[[sig_var]]) & res[[sig_var]] <= sig_cutoff
       res$Feature     <- factor(res$Feature, levels = meta$var_names)
       res$PC          <- factor(res$PC,      levels = meta$pc_names)
       if (length(datasources) > 1) res$Site <- site_name
@@ -309,19 +320,24 @@ ds.plotDrivers <- function(data = NULL,
   if (length(datasources) > 1) {
     message("Combining associations across ", length(datasources), " sites ",
             "(Fisher's method).")
+
+    # Sanity check: with federated PCA, PC names must be identical across sites
+    validate_federated_pcs(site_metadata)
+
+    combined_results <- combine_pvalues_fisher(site_results, site_metadata)
+
+    if (!is.null(p_adj)) {
+      combined_results$pvalue_adj <- p.adjust(combined_results$pvalue, method = p_adj)
+    }
+  } else {
+    # A single site: combining is the identity operation. If p_adj was
+    # requested, server_p_adj (see above) already asked the server to
+    # compute pvalue_adj, so it is used as-is rather than adjusting a second
+    # time here.
+    combined_results <- site_results[[1]]
   }
 
-  # Sanity check: with federated PCA, PC names must be identical across sites
-  validate_federated_pcs(site_metadata)
-
-  combined_results <- combine_pvalues_fisher(site_results, site_metadata)
-
-  if (!is.null(p_adj)) {
-    combined_results$pvalue      <- p.adjust(combined_results$pvalue, method = p_adj)
-    combined_results$Association <- -log10(combined_results$pvalue)
-  }
-
-  combined_results$Significant <- !is.na(combined_results$pvalue) & combined_results$pvalue <= sig_cutoff
+  combined_results$Significant <- !is.na(combined_results[[sig_var]]) & combined_results[[sig_var]] <= sig_cutoff
   combined_results$Feature     <- factor(combined_results$Feature,
                                          levels = site_metadata[[1]]$var_names)
   combined_results$PC          <- factor(combined_results$PC,
@@ -396,7 +412,7 @@ validate_federated_pcs <- function(site_metadata) {
   invisible(lapply(seq_along(pc_names_list)[-1], function(i) {
     if (!identical(pc_names_list[[i]], reference_pcs)) {
       stop("PC names differ across sites despite type = 'combine'. ",
-           "This should not happen — please report this as a bug.", call. = FALSE)
+           "This should not happen - please report this as a bug.", call. = FALSE)
     }
   }))
   return(invisible(TRUE))
@@ -439,10 +455,28 @@ combine_pvalues_fisher <- function(site_results, site_metadata) {
 
   }, feat = combinations$Feature, pc = combinations$PC)
 
-  combinations$Association <- -log10(combinations$pvalue)
   return(combinations)
 }
 
+
+#' @title Format a p value in fixed-width scientific notation
+#'
+#' @description Internal helper used to label tiles in \code{build_drivers_plot}
+#'   when \code{label = TRUE}. Formats a numeric vector of p values as
+#'   scientific notation with two decimal places and no zero-padding on the
+#'   exponent (e.g. \code{3.12e-4}, not \code{3.12e-04}).
+#'
+#' @param p Numeric vector of p values.
+#'
+#' @return A character vector.
+#' @keywords internal
+format_pval_sci <- function(p) {
+  out    <- rep(NA_character_, length(p))
+  not_na <- !is.na(p)
+  s      <- formatC(p[not_na], format = "e", digits = 2)
+  out[not_na] <- sub("e([+-])0*(\\d)", "e\\1\\2", s)
+  out
+}
 
 #' @title Build the PCA drivers heatmap
 #'
@@ -452,26 +486,37 @@ combine_pvalues_fisher <- function(site_results, site_metadata) {
 #'   transposition and optional faceting by study.
 #'
 #' @param results Data frame of associations returned by the aggregation step.
+#'   Must contain a \code{pvalue} column and, when \code{p_adj} is not
+#'   \code{NULL}, a \code{pvalue_adj} column.
 #' @param sig_cutoff Numeric. Significance threshold on -log10(p).
-#' @param p_adj Character. Method used for p value adjustment (for labelling).
+#' @param p_adj Character. Method used for p value adjustment. Also selects
+#'   whether \code{pvalue} or \code{pvalue_adj} drives colour, label and
+#'   significance highlighting.
 #' @param max_col Numeric or \code{NULL}. Upper limit for the colour scale.
 #' @param title Character. Plot title.
 #' @param legend Logical. Whether to display the legend.
 #' @param transpose_plot Logical. If \code{TRUE}, swap features and PCs on the axes.
-#' @param label Character. Label shown next to significant cells.
+#' @param label Logical. If \code{TRUE}, print the p value (or adjusted p
+#'   value) on each tile, in scientific notation with two decimal places.
 #' @param faceted Logical. If \code{TRUE}, facet the plot by study.
 #'
 #' @return A \code{ggplot} object.
 #'
 #' @importFrom ggplot2 ggplot aes geom_tile geom_text coord_equal facet_wrap
-#'  scale_fill_gradientn scale_colour_manual guides guide_legend labs theme_bw
-#'  theme element_text element_rect
+#' @importFrom ggplot2 scale_fill_gradientn scale_colour_manual guides guide_legend
+#' @importFrom ggplot2 labs theme_bw theme element_text element_rect
+#' @importFrom rlang .data
 #' @keywords internal
 build_drivers_plot <- function(results, sig_cutoff, p_adj, max_col,
                                title, legend, transpose_plot, label,
                                faceted = FALSE) {
+  # Name of the column driving colour/label/significance, and the matching
+  # legend text: the raw p value, unless an adjustment method was requested.
+  sig_var <- if (is.null(p_adj)) "pvalue" else "pvalue_adj"
+  p_label <- if (is.null(p_adj)) "p" else "p adj"
+
   if (is.null(max_col)) {
-    max_col <- max(ceiling(results$Association), na.rm = TRUE)
+    max_col <- max(ceiling(-log10(results[[sig_var]])), na.rm = TRUE)
   }
 
   results$x <- if (transpose_plot) results$Feature else results$PC
@@ -485,7 +530,7 @@ build_drivers_plot <- function(results, sig_cutoff, p_adj, max_col,
 
   p <- ggplot(
     results,
-    aes(x = x, y = y, fill = Association, colour = Significant)
+    aes(x = .data$x, y = .data$y, fill = -log10(.data[[sig_var]]), colour = .data$Significant)
   ) +
     geom_tile(linewidth = if (faceted) 0.5 else 1, width = 0.9, height = 0.9) +
     coord_equal() +
@@ -497,8 +542,8 @@ build_drivers_plot <- function(results, sig_cutoff, p_adj, max_col,
     scale_colour_manual(
       values = c("grey90", "black"),
       labels = c(
-        paste(ifelse(is.null(p_adj), "p", "p adj"), ">",  sig_cutoff),
-        paste(ifelse(is.null(p_adj), "p", "p adj"), "<=", sig_cutoff)
+        paste(p_label, ">",  sig_cutoff),
+        paste(p_label, "<=", sig_cutoff)
       ),
       name = ""
     ) +
@@ -522,13 +567,13 @@ build_drivers_plot <- function(results, sig_cutoff, p_adj, max_col,
       theme(
         strip.background = element_rect(fill = "#dce8f0", colour = "grey70"),
         strip.text       = element_text(face = "bold", size = 10),
-        panel.spacing    = unit(1, "lines")
+        panel.spacing    = grid::unit(1, "lines")
       )
   }
 
   if (label) {
     p <- p + geom_text(
-      aes(label = round(Association, 2)),
+      aes(label = format_pval_sci(.data[[sig_var]])),
       colour = "black",
       size   = if (faceted) 2.5 else 3
     )

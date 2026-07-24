@@ -18,6 +18,10 @@ skip_if_no_dslite <- function() {
   testthat::skip_if_not_installed("dsSwissKnife")
   testthat::skip_if_not_installed("dsSwissKnifeClient")
   testthat::skip_if_not_installed("dsPCAdrivers")
+
+  # dsSwissKnifeClient calls some DSI functions (e.g. datashield.aggregate)
+  # without namespacing them, so DSI must be attached to the search path.
+  suppressPackageStartupMessages(library(DSI))
 }
 
 # Mock DSConnection for unit tests --------------------------------------------
@@ -27,7 +31,7 @@ skip_if_no_dslite <- function() {
 fake_ds_connection <- function() {
   testthat::skip_if_not_installed("DSI")
   # setClass is idempotent — calling it multiple times in a session is safe.
-  if (!methods::existsClass("FakeDSConn")) {
+  if (!methods::isClass("FakeDSConn")) {
     methods::setClass("FakeDSConn", contains = "DSConnection")
   }
   methods::new("FakeDSConn")
@@ -157,10 +161,9 @@ make_fake_site_outputs <- function(pvals_site1, pvals_site2,
     combs <- expand.grid(Feature = features, PC = pcs,
                          stringsAsFactors = FALSE, KEEP.OUT.ATTRS = FALSE)
     data.frame(
-      Feature     = combs$Feature,
-      PC          = combs$PC,
-      pvalue      = pvals,
-      Association = -log10(pvals),
+      Feature = combs$Feature,
+      PC      = combs$PC,
+      pvalue  = pvals,
       stringsAsFactors = FALSE
     )
   }
