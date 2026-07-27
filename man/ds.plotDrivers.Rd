@@ -70,7 +70,7 @@ TRUE.}
 
 \item{label}{Logical. Print the p value (or adjusted p value, if
 \code{p_adj} is set) on each tile, in scientific notation with two
-decimal places (e.g. \code{3.12e-4})? Default FALSE.}
+decimal places (e.g. \code{3.12e-04})? Default FALSE.}
 
 \item{sig_cutoff}{Numeric. Significance threshold for outlining tiles. Default
 0.05.}
@@ -160,7 +160,7 @@ are \emph{not} combined. Results are shown as a faceted plot.
 Association strength is visualised as \eqn{-\log_{10}(p)}. Tiles are outlined
 in black when p (or adjusted p) \eqn{\leq} \code{sig_cutoff}. When
 \code{label = TRUE}, the p value (or adjusted p value) is printed on each
-tile, in scientific notation with two decimal places (e.g. \code{3.12e-4}).
+tile, in scientific notation with two decimal places (e.g. \code{3.12e-04}).
 }
 \examples{
 \dontrun{

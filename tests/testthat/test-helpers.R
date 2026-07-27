@@ -137,15 +137,6 @@ test_that("combine_pvalues_fisher produces one row per Feature x PC combination"
 })
 
 
-# format_pval_sci --------------------------------------------------------------
-
-test_that("format_pval_sci formats p values as scientific notation with no zero-padded exponent", {
-  expect_equal(dsPCAdriversClient:::format_pval_sci(3.123e-4), "3.12e-4")
-  expect_equal(dsPCAdriversClient:::format_pval_sci(9.892336e-29), "9.89e-29")
-  expect_equal(dsPCAdriversClient:::format_pval_sci(0.05), "5.00e-2")
-  expect_true(is.na(dsPCAdriversClient:::format_pval_sci(NA_real_)))
-})
-
 # build_drivers_plot ----------------------------------------------------------
 
 #' Minimal results frame matching what ds.plotDrivers produces internally.
@@ -257,7 +248,7 @@ test_that("build_drivers_plot labels tiles with the formatted p value", {
 
   label_layer_data <- ggplot2::layer_data(p, length(p$layers))
   expect_equal(label_layer_data$label,
-               dsPCAdriversClient:::format_pval_sci(res$pvalue))
+               formatC(res$pvalue, format = "e", digits = 2))
 })
 
 test_that("build_drivers_plot uses p adj legend label when p_adj is set", {

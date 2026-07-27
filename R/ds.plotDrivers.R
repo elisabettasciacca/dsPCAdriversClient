@@ -39,7 +39,7 @@
 #' @param n_pc Integer. Number of principal components to include. Default 5.
 #' @param label Logical. Print the p value (or adjusted p value, if
 #'   \code{p_adj} is set) on each tile, in scientific notation with two
-#'   decimal places (e.g. \code{3.12e-4})? Default FALSE.
+#'   decimal places (e.g. \code{3.12e-04})? Default FALSE.
 #' @param sig_cutoff Numeric. Significance threshold for outlining tiles. Default
 #'   0.05.
 #' @param p_adj Optional character. P value adjustment method: one of
@@ -112,7 +112,7 @@
 #' Association strength is visualised as \eqn{-\log_{10}(p)}. Tiles are outlined
 #' in black when p (or adjusted p) \eqn{\leq} \code{sig_cutoff}. When
 #' \code{label = TRUE}, the p value (or adjusted p value) is printed on each
-#' tile, in scientific notation with two decimal places (e.g. \code{3.12e-4}).
+#' tile, in scientific notation with two decimal places (e.g. \code{3.12e-04}).
 #'
 #' @examples
 #' \dontrun{
@@ -459,25 +459,6 @@ combine_pvalues_fisher <- function(site_results, site_metadata) {
 }
 
 
-#' @title Format a p value in fixed-width scientific notation
-#'
-#' @description Internal helper used to label tiles in \code{build_drivers_plot}
-#'   when \code{label = TRUE}. Formats a numeric vector of p values as
-#'   scientific notation with two decimal places and no zero-padding on the
-#'   exponent (e.g. \code{3.12e-4}, not \code{3.12e-04}).
-#'
-#' @param p Numeric vector of p values.
-#'
-#' @return A character vector.
-#' @keywords internal
-format_pval_sci <- function(p) {
-  out    <- rep(NA_character_, length(p))
-  not_na <- !is.na(p)
-  s      <- formatC(p[not_na], format = "e", digits = 2)
-  out[not_na] <- sub("e([+-])0*(\\d)", "e\\1\\2", s)
-  out
-}
-
 #' @title Build the PCA drivers heatmap
 #'
 #' @description Internal helper that constructs the ggplot heatmap of
@@ -573,7 +554,7 @@ build_drivers_plot <- function(results, sig_cutoff, p_adj, max_col,
 
   if (label) {
     p <- p + geom_text(
-      aes(label = format_pval_sci(.data[[sig_var]])),
+      aes(label = formatC(.data[[sig_var]], format = "e", digits = 2)),
       colour = "black",
       size   = if (faceted) 2.5 else 3
     )

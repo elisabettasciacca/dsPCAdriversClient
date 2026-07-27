@@ -354,7 +354,7 @@ ds.plotDrivers(
 Several aspects of the output can be adjusted:
   
 - The colour scale maximum can be fixed with `max_col`; 
-- Tile labels showing the p value (or adjusted p value, if `p_adj` is set), in scientific notation with two decimal places (e.g. `3.12e-4`), can be enabled with `label = TRUE`;
+- Tile labels showing the p value (or adjusted p value, if `p_adj` is set), in scientific notation with two decimal places (e.g. `3.12e-04`), can be enabled with `label = TRUE`;
 - The axis orientation can be transposed so that PCs appear on the y-axis and variables on the x-axis;
 - To reduce visual clutter, PCs or variables with no significant associations can be dropped from the plot
 entirely using `drop_insignificant_x` and `drop_insignificant_y`.
